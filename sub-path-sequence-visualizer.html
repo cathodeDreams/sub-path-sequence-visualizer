@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Plane Path Animation</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #0D0E0E;
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #F2F2F3;
+        }
+        canvas { display: block; }
+        #container { 
+            width: 800px; 
+            height: 800px; 
+            margin: 50px auto;
+            position: relative;
+        }
+        #container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 2px dashed rgba(127, 255, 0, 0.3);
+            pointer-events: none;
+        }
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            padding: 15px;
+            background: rgba(26, 27, 28, 0.8);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        button {
+            background: #0D0E0E;
+            color: #7FFF00;
+            border: 2px solid #7FFF00;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 200ms ease-in-out;
+        }
+        button:hover {
+            background: #7FFF00;
+            color: #0D0E0E;
+        }
+        button:disabled {
+            background: #333537;
+            border-color: #4D5052;
+            color: #9BA0A3;
+            cursor: not-allowed;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 12px;
+            color: #9BA0A3;
+        }
+        select, input[type="range"] {
+            background: #0D0E0E;
+            color: #F2F2F3;
+            border: 1px solid #4D5052;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            color: #FF3366;
+            font-size: 12px;
+        }
+        .recording-indicator.active {
+            display: flex;
+        }
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background: #FF3366;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .control-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .control-row input[type="number"] {
+            width: 60px;
+            padding: 4px;
+            border-radius: 4px;
+            border: 1px solid #4D5052;
+            background: #0D0E0E;
+            color: #F2F2F3;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <div id="controls">
+        <div class="control-group">
+            <label for="pathStyle">Path Style</label>
+            <select id="pathStyle">
+                <option value="random">Random</option>
+                <option value="spiral">Spiral</option>
+                <option value="wave">Wave</option>
+                <option value="loop">Loop</option>
+                <option value="zigzag">Zigzag</option>
+                <option value="helix">Helix</option>
+                <option value="lemniscate">Lemniscate</option>
+                <option value="torus">Torus Knot</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="planeStyle">Plane Style</label>
+            <select id="planeStyle">
+                <option value="static">Static Size</option>
+                <option value="pulse">Pulsing</option>
+                <option value="grow">Growing</option>
+                <option value="shrink">Shrinking</option>
+                <option value="breathe">Breathing</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="planeSize">Base Plane Size</label>
+            <input type="range" id="planeSize" min="0.2" max="2" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+            <label for="speed">Animation Speed</label>
+            <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+            <label for="pathNodes">Path Complexity</label>
+            <div class="control-row">
+                <input type="number" id="pathNodes" min="4" max="20" value="6" title="Number of control points">
+                <input type="range" id="pathSmoothing" min="50" max="200" step="10" value="100" title="Path smoothness">
+            </div>
+        </div>
+        <button id="recordBtn">Record Animation</button>
+        <button id="newPathBtn">Generate New Path</button>
+        <div class="recording-indicator">
+            <div class="pulse"></div>
+            Recording...
+        </div>
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/ccapture.js-npmfixed@1.1.0/build/CCapture.all.min.js"></script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        
+        const COLORS = {
+            background: 0x0D0E0E,
+            planeColors: [
+                0x9B87AB,
+                0x4B9900,
+                0xFFE5EC,
+                0xD1C1E1,
+                0xC4E3D4,
+                0xFF3366,
+                0xE3D6F0,
+                0x668FFF,
+                0xFFB366,
+                0x96B7A5
+            ],
+            active: 0x7FFF00
+        };
+
+        let scene, camera, renderer, controls, composer;
+        let planes = [];
+        let points = [];
+        const totalPoints = 100;
+        const numPlanes = 10;
+        let startTime = Date.now();
+        let isRecording = false;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let animationSpeed = 1;
+        let baseSize = 1;
+        let planeStyle = 'static';
+
+        const PATH_PARAMS = {
+            scale: { min: 2, max: 4 },
+            segments: 6,
+            variation: 0.4,
+            spread: {
+                x: 12,
+                y: 6,
+                z: 5
+            },
+            styles: [
+                'spiral',
+                'wave',
+                'loop',
+                'zigzag',
+                'helix',
+                'lemniscate',
+                'torus'
+            ]
+        };
+
+        function createSmoothPath() {
+            const newPoints = [];
+            const style = document.getElementById('pathStyle').value === 'random' ? 
+                PATH_PARAMS.styles[Math.floor(Math.random() * PATH_PARAMS.styles.length)] :
+                document.getElementById('pathStyle').value;
+            const scale = THREE.MathUtils.lerp(PATH_PARAMS.scale.min, PATH_PARAMS.scale.max, Math.random());
+            const segments = parseInt(document.getElementById('pathNodes').value);
+            const smoothing = parseInt(document.getElementById('pathSmoothing').value);
+            
+            const controlPoints = [];
+            
+            switch(style) {
+                case 'spiral':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const angle = t * Math.PI * 4;
+                        const radius = THREE.MathUtils.lerp(PATH_PARAMS.spread.x * 0.2, PATH_PARAMS.spread.x * 0.5, t);
+                        const x = Math.cos(angle) * radius;
+                        const z = Math.sin(angle) * radius;
+                        const y = t * PATH_PARAMS.spread.y - PATH_PARAMS.spread.y/2;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+                    
+                case 'wave':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const x = (t * PATH_PARAMS.spread.x) - PATH_PARAMS.spread.x/2;
+                        const y = Math.sin(t * Math.PI * 2) * scale;
+                        const z = Math.cos(t * Math.PI * 3) * PATH_PARAMS.spread.z * 0.5;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+                    
+                case 'loop':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const angle = t * Math.PI * 2;
+                        const x = (t * PATH_PARAMS.spread.x) - PATH_PARAMS.spread.x/2;
+                        const y = Math.sin(angle) * scale;
+                        const z = Math.cos(angle) * PATH_PARAMS.spread.z * 0.7;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+                    
+                case 'zigzag':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const x = (t * PATH_PARAMS.spread.x) - PATH_PARAMS.spread.x/2;
+                        const y = ((i % 2) * 2 - 1) * scale + Math.random() * PATH_PARAMS.variation;
+                        const z = Math.sin(t * Math.PI * 2) * PATH_PARAMS.spread.z * 0.5;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+
+                case 'helix':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const angle = t * Math.PI * 4;
+                        const radius = scale;
+                        const x = Math.cos(angle) * radius;
+                        const z = Math.sin(angle) * radius;
+                        const y = t * PATH_PARAMS.spread.y * 2 - PATH_PARAMS.spread.y;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+                    
+                case 'lemniscate':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const angle = t * Math.PI * 2;
+                        const a = scale * 2;
+                        const x = (a * Math.cos(angle)) / (1 + Math.sin(angle) * Math.sin(angle));
+                        const z = (a * Math.cos(angle) * Math.sin(angle)) / (1 + Math.sin(angle) * Math.sin(angle));
+                        const y = Math.sin(t * Math.PI * 2) * scale;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+                    
+                case 'torus':
+                    for(let i = 0; i < segments; i++) {
+                        const t = i / (segments - 1);
+                        const p = 2, q = 3;
+                        const angle = t * Math.PI * 4;
+                        const r = Math.cos(q * angle) * scale + scale * 2;
+                        const x = r * Math.cos(p * angle);
+                        const z = r * Math.sin(p * angle);
+                        const y = Math.sin(q * angle) * scale;
+                        controlPoints.push(new THREE.Vector3(x, y, z));
+                    }
+                    break;
+            }
+            
+            controlPoints.forEach(point => {
+                point.x += (Math.random() - 0.5) * PATH_PARAMS.variation;
+                point.y += (Math.random() - 0.5) * PATH_PARAMS.variation;
+                point.z += (Math.random() - 0.5) * PATH_PARAMS.variation;
+            });
+            
+            for(let i = 0; i < smoothing; i++) {
+                const t = i / (smoothing - 1);
+                const point = new THREE.Vector3();
+                
+                const segment = Math.min(Math.floor(t * (controlPoints.length - 1)), controlPoints.length - 2);
+                const segmentT = (t * (controlPoints.length - 1)) % 1;
+                
+                const p0 = controlPoints[Math.max(0, segment - 1)];
+                const p1 = controlPoints[segment];
+                const p2 = controlPoints[segment + 1];
+                const p3 = controlPoints[Math.min(controlPoints.length - 1, segment + 2)];
+                
+                const t2 = segmentT * segmentT;
+                const t3 = t2 * segmentT;
+                
+                ['x', 'y', 'z'].forEach(coord => {
+                    point[coord] = 0.5 * (
+                        (2 * p1[coord]) +
+                        (-p0[coord] + p2[coord]) * segmentT +
+                        (2 * p0[coord] - 5 * p1[coord] + 4 * p2[coord] - p3[coord]) * t2 +
+                        (-p0[coord] + 3 * p1[coord] - 3 * p2[coord] + p3[coord]) * t3
+                    );
+                });
+                
+                newPoints.push(point);
+            }
+            
+            return newPoints;
+        }
+
+        function updatePlaneSize(plane, progress) {
+            const size = baseSize;
+            switch(planeStyle) {
+                case 'pulse':
+                    const pulseScale = 1 + Math.sin(Date.now() * 0.005) * 0.2;
+                    plane.scale.set(size * pulseScale, size * pulseScale, size * 0.1);
+                    break;
+                case 'grow':
+                    const growScale = 1 + progress;
+                    plane.scale.set(size * growScale, size * growScale, size * 0.1);
+                    break;
+                case 'shrink':
+                    const shrinkScale = 2 - progress;
+                    plane.scale.set(size * shrinkScale, size * shrinkScale, size * 0.1);
+                    break;
+                case 'breathe':
+                    const breatheScale = 1 + Math.sin(progress * Math.PI) * 0.3;
+                    plane.scale.set(size * breatheScale, size * breatheScale, size * 0.1);
+                    break;
+                default:
+                    plane.scale.set(size, size, size * 0.1);
+            }
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(COLORS.background);
+            
+            camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+            camera.position.set(6, 6, 12);
+            camera.lookAt(0, 0, 0);
+            
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                preserveDrawingBuffer: true
+            });
+            renderer.setSize(800, 800);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            
+            composer = new EffectComposer(renderer);
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+            
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(800, 800),
+                0.5,
+                0.4,
+                0.85
+            );
+            composer.addPass(bloomPass);
+            
+            document.getElementById('container').appendChild(renderer.domElement);
+            
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            points = createSmoothPath();
+
+            const planeGeometry = new THREE.BoxGeometry(1, 1, 0.1);
+            
+            const spacing = Math.floor(totalPoints / numPlanes);
+            for(let i = 0; i < numPlanes; i++) {
+                const planeColor = COLORS.planeColors[i % COLORS.planeColors.length];
+                const wireframeMaterial = new THREE.MeshPhongMaterial({ 
+                    color: planeColor,
+                    wireframe: true,
+                    emissive: planeColor,
+                    emissiveIntensity: 0.2
+                });
+                const activeMaterial = new THREE.MeshPhongMaterial({ 
+                    color: planeColor,
+                    emissive: planeColor,
+                    emissiveIntensity: 0.5
+                });
+                const plane = new THREE.Mesh(planeGeometry, wireframeMaterial.clone());
+                plane.castShadow = true;
+                plane.receiveShadow = true;
+                plane.isActive = false;
+                plane.activeMaterial = activeMaterial;
+                plane.wireframeMaterial = wireframeMaterial;
+                plane.pathIndex = i * spacing;
+                scene.add(plane);
+                planes.push(plane);
+            }
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 5, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 1024;
+            directionalLight.shadow.mapSize.height = 1024;
+            scene.add(directionalLight);
+            
+            document.getElementById('speed').addEventListener('input', (e) => {
+                animationSpeed = parseFloat(e.target.value);
+            });
+            
+            document.getElementById('pathStyle').addEventListener('change', (e) => {
+                if(e.target.value !== 'random') {
+                    PATH_PARAMS.styles = [e.target.value];
+                } else {
+                    PATH_PARAMS.styles = ['spiral', 'wave', 'loop', 'zigzag'];
+                }
+                resetAnimation();
+            });
+        }
+
+        function updatePlanes() {
+            const cycleTime = 4000 / animationSpeed;
+            const time = (Date.now() - startTime) % (cycleTime * 2);
+            const normalizedTime = time / cycleTime;
+            
+            const isForward = normalizedTime <= 1;
+            let progress = isForward ? normalizedTime : 2 - normalizedTime;
+            
+            const activeIndex = Math.floor(progress * numPlanes);
+            
+            planes.forEach((plane, index) => {
+                if (index === activeIndex) {
+                    if (!plane.isActive) {
+                        plane.material = plane.activeMaterial;
+                        plane.isActive = true;
+                    }
+                } else {
+                    if (plane.isActive) {
+                        plane.material = plane.wireframeMaterial;
+                        plane.isActive = false;
+                    }
+                }
+
+                const point = points[plane.pathIndex];
+                const nextPoint = points[Math.min(plane.pathIndex + 1, totalPoints - 1)];
+                
+                plane.position.copy(point);
+                plane.lookAt(nextPoint);
+                
+                updatePlaneSize(plane, plane.pathIndex / totalPoints);
+            });
+        }
+
+        function getSupportedMimeType() {
+            const types = [
+                'video/webm;codecs=vp9',
+                'video/webm;codecs=vp8',
+                'video/webm',
+                'video/mp4'
+            ];
+            
+            return types.find(type => MediaRecorder.isTypeSupported(type)) || '';
+        }
+
+        function resetAnimation() {
+            startTime = Date.now();
+            points = createSmoothPath();
+        }
+
+        function startRecording() {
+            const recordingIndicator = document.querySelector('.recording-indicator');
+            recordingIndicator.classList.add('active');
+            recordButton.disabled = true;
+            
+            const mimeType = getSupportedMimeType();
+            if (!mimeType) {
+                alert('Your browser does not support video recording');
+                return;
+            }
+            
+            isRecording = true;
+            startTime = Date.now();
+            recordedChunks = [];
+            
+            const canvas = renderer.domElement;
+            const stream = canvas.captureStream(60);
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: mimeType,
+                videoBitsPerSecond: 5000000
+            });
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+            
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'plane-animation.' + (mimeType.includes('webm') ? 'webm' : 'mp4');
+                a.click();
+                URL.revokeObjectURL(url);
+                recordedChunks = [];
+                recordingIndicator.classList.remove('active');
+                recordButton.disabled = false;
+            };
+            
+            mediaRecorder.start();
+            
+            setTimeout(() => {
+                isRecording = false;
+                mediaRecorder.stop();
+            }, 8000);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            updatePlanes();
+            composer.render();
+        }
+
+        init();
+        animate();
+
+        const recordButton = document.getElementById('recordBtn');
+        recordButton.addEventListener('click', startRecording);
+        
+        const newPathButton = document.getElementById('newPathBtn');
+        newPathButton.addEventListener('click', resetAnimation);
+        
+        document.getElementById('planeSize').addEventListener('input', (e) => {
+            baseSize = parseFloat(e.target.value);
+        });
+        document.getElementById('planeStyle').addEventListener('change', (e) => {
+            planeStyle = e.target.value;
+        });
+        document.getElementById('pathNodes').addEventListener('change', resetAnimation);
+        document.getElementById('pathSmoothing').addEventListener('change', resetAnimation);
+    </script>
+</body>
+</html>
